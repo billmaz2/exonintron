@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cDNA → Genomic Exon/Intron Mapper</title>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);--bg:#fff;--fg:#1d2430;--mut:#667;--bd:#d5d9e0;--ex:#2e9e5b;--in:#d64545}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14181f;--fg:#e6e9ef;--mut:#9aa3b2;--bd:#323a47;--ex:#35b06a;--in:#e05a5a}}
+:root[data-theme="dark"]{--bg:#14181f;--fg:#e6e9ef;--mut:#9aa3b2;--bd:#323a47;--ex:#35b06a;--in:#e05a5a}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;padding:20px;max-width:1100px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 4px}p.s{color:var(--mut);margin:0 0 16px}
+.g{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:700px){.g{grid-template-columns:1fr}}
+label{font-weight:600;display:block;margin-bottom:4px}
+textarea{width:100%;height:150px;box-sizing:border-box;font:12px/1.4 ui-monospace,Menlo,monospace;background:var(--bg);color:var(--fg);border:1px solid var(--bd);border-radius:6px;padding:8px}
+input[type=file]{margin:6px 0;max-width:100%}
+.row{display:flex;gap:12px;align-items:center;margin:14px 0;flex-wrap:wrap}
+button{background:var(--fg);color:var(--bg);border:0;border-radius:6px;padding:8px 16px;font-size:14px;cursor:pointer}
+button.o{background:none;color:var(--fg);border:1px solid var(--bd)}
+input[type=number]{width:90px;padding:5px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--fg)}
+#msg{color:var(--in);min-height:1.4em}
+.scroll{overflow-x:auto;padding:10px 0 4px;border-top:1px solid var(--bd)}
+.track{display:flex;width:max-content;min-width:100%}
+.seg{flex:none;text-align:center}
+.box{height:46px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;font-size:13px;border:1px solid rgba(0,0,0,.25);border-radius:0}
+.ex .box{background:var(--ex)}.in .box{background:var(--in)}
+.co{display:flex;justify-content:space-between;font:11px ui-monospace,Menlo,monospace;color:var(--mut);padding:3px 2px 0;gap:6px}
+.legend span{display:inline-block;width:12px;height:12px;vertical-align:-1px;margin:0 4px 0 12px}
+table{border-collapse:collapse;width:100%;margin-top:14px;font-size:13px;display:block;overflow-x:auto}
+th,td{border:1px solid var(--bd);padding:5px 8px;text-align:left;white-space:nowrap}
+td.sq{font:11px ui-monospace,monospace;white-space:normal;word-break:break-all;min-width:240px}
+</style></head><body>
+<h1>cDNA → genomic exon / intron map</h1>
+<p class="s">Paste or upload a cDNA FASTA and the genomic-region FASTA (with introns). Preloaded: human <b>HBB</b>.</p>
+<div class="g">
+ <div><label>cDNA FASTA</label><textarea id="c" spellcheck="false"></textarea><input type="file" id="fc" accept=".fa,.fasta,.fna,.txt"></div>
+ <div><label>Genomic region FASTA</label><textarea id="gn" spellcheck="false"></textarea><input type="file" id="fg" accept=".fa,.fasta,.fna,.txt"></div>
+</div>
+<div class="row"><button id="go">Map exons / introns</button><button class="o" id="rs">Reset to HBB</button>
+<label style="margin:0;font-weight:400">Genomic start coordinate <input type="number" id="off" value="1"></label></div>
+<div id="msg"></div>
+<div id="out" hidden>
+ <div class="legend"><b id="sum"></b> <span style="background:var(--ex)"></span>exon <span style="background:var(--in)"></span>intron</div>
+ <div class="scroll"><div class="track" id="tr"></div></div>
+ <table id="tb"></table>
+</div>
+<div style="margin-top:22px;border-top:1px solid var(--bd);padding-top:14px">
+ <label>Extract a region as FASTA</label>
+ <div class="row" style="margin-top:6px">
+  <label style="margin:0;font-weight:400">Start <input type="number" id="xs"></label>
+  <label style="margin:0;font-weight:400">End <input type="number" id="xe"></label>
+  <button id="xg">Create FASTA</button>
+  <button class="o" id="xd">Download .fasta</button>
+  <button class="o" id="xc">Copy</button>
+ </div>
+ <textarea id="xo" spellcheck="false" placeholder="Extracted FASTA appears here (coordinates use the same numbering as the map above)"></textarea>
+</div>
+<script>
+// HBB pieces (cDNA-derived exons; flanks/introns are reference-style sequence)
+const E1="ACATTTGCTTCTGACACAACTGTGTTCACTAGCAACCTCAAACAGACACCATGGTGCATCTGACTCCTGAGGAGAAGTCTGCCGTTACTGCCCTGTGGGGCAAGGTGAACGTGGATGAAGTTGGTGGTGAG";
+const I1="GTTGGTATCAAGGTTACAAGACAGGTTTAAGGAGACCAATAGAAACTGGGCATGTGGAGACAGAGAAGACTCTTGGGTTTCTGATAGGCACTGACTCTCTCTGCCTATTGGTCTATTTTCCCACCCTTAG";
+const E2="GCCCTGGGCAGGCTGCTGGTGGTCTACCCTTGGACCCAGAGGTTCTTTGAGTCCTTTGGGGATCTGTCCACTCCTGATGCTGTTATGGGCAACCCTAAGGTGAAGGCTCATGGCAAGAAAGTGCTCGGTGCCTTTAGTGATGGCCTGGCTCACCTGGACAACCTCAAGGGCACCTTTGCCACACTGAGTGAGCTGCACTGTGACAAGCTGCACGTGGATCCTGAGAACTTCAG";
+const I2="GTGAGTCTATGGGACGCTTGATGTTTTCTTTCCCCTTCTTTTCTATGGTTAAGTTCATGTCATAGGAAGGGGATAAGTAACAGGGTACAGTTTAGAATGGGAAACAGACGAATGATTGCATCAGTGTGGAAGTCTCAGGATCGTTTTAGTTTCTTTTATTTGCTGTTCATAACAATTGTTTTCTTTTGTTTAATTCTTGCTTTCTTTTTTTTTCTTCTCCGCAATTTTTACTATTATACTTAATGCCTTAACATTGTGTATAACAAAAGGAAATATCTCTGAGATACATTAAGTAACTTAAAAAAAAACTTTACACAGTCTGCCTAGTACATTACTATTTGGAATATATGTGTGCTTATTTGCATATTCATAATCTCCCTACTTTATTTTCTTTTATTTTTAATTGATACATAATCATTATACATATTTATGGGTTAAAGTGTAATGTTTTAATATGTGTACACATATTGACCAAATCAGGGTAATTTTGCATTTGTAATTTTAAAAAATGCTTTCTTCTTTTAATATACTTTTTTGTTTATCTTATTTCTAATACTTTCCCTAATCTCTTTCTTTCAGGGCAATAATGATACAATGTATCATGCCTCTTTGCACCATTCTAAAGAATAACAGTGATAATTTCTGGGTTAAGGCAATAGCAATATCTCTGCATATAAATATTTCTGCATATAAATTGTAACTGATGTAAGAGGTTTCATATTGCTAATAGCAGCTACAATCCAGCTACCATTCTGCTTTTATTTTATGGTTGGGATAAGGCTGGATTATTCTGAGTCCAAGCTAGGCCCTTTTGCTAATCATGTTCATACCTCTTATCTTCCTCCCACAG";
+const E3="GCTCCTGGGCAACGTGCTGGTCTGTGTGCTGGCCCATCACTTTGGCAAAGAATTCACCCCACCAGTGCAGGCTGCCTATCAGAAAGTGGTGGCTGGTGTGGCTAATGCCCTGGCCCACAAGTATCACTAAGCTCGCTTTCTTGCTGTCCAATTTCTATTAAAGGTTCCTTTGTTCCCTAAGTCCAACTACTAAACTGGGGGATATTATGAAGGGCCTTGAGCATCTGGATTCTGCCTAATAAAAAACATTTATTTTCATTGC";
+const UP="GGGCTGGGCATAAAAGTCAGGGCAGAGCCATCTATTGCTTAC";
+const wrap=(h,s)=>">"+h+"\n"+s.match(/.{1,60}/g).join("\n");
+function preload(){
+ $("c").value=wrap("HBB_cDNA NM_000518 (mRNA, human beta-globin)",E1+E2+E3);
+ $("gn").value=wrap("HBB_genomic_region (gene sense, with introns)",UP+E1+I1+E2+I2+E3);
+ $("off").value=1;
+}
+const $=id=>document.getElementById(id);
+const parse=t=>{const l=t.trim().split(/\r?\n/);const h=l[0]&&l[0][0]===">"?l.shift().slice(1).trim():"";return{h,s:l.join("").replace(/[^A-Za-z]/g,"").toUpperCase().replace(/U/g,"T")}};
+function load(inp,ta){inp.onchange=()=>{const f=inp.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{$(ta).value=r.result};r.readAsText(f)}}
+load($("fc"),"c");load($("fg"),"gn");
+
+function align(c,g){
+ const ext=(ci,gi)=>{let n=0;while(ci+n<c.length&&gi+n<g.length&&c[ci+n]===g[gi+n])n++;return n};
+ // first seed
+ let ci=-1,gi=-1;
+ for(let o=0;o+20<=c.length&&gi<0;o+=5){const p=g.indexOf(c.substr(o,20));if(p>=0){ci=o;gi=p}}
+ if(gi<0)return null;
+ // extend back to start of block
+ while(ci>0&&gi>0&&c[ci-1]===g[gi-1]){ci--;gi--}
+ let L=ext(ci,gi);const ex=[{cs:ci,gs:gi,len:L}];
+ while(true){
+  const last=ex[ex.length-1],cEnd=last.cs+last.len,gEnd=last.gs+last.len;
+  if(cEnd>=c.length)break;
+  let p=-1,k=0;
+  for(const kk of [16,12,9]){if(cEnd+kk>c.length)continue;p=g.indexOf(c.substr(cEnd,kk),gEnd);if(p>=0){k=kk;break}}
+  if(p<0)break;
+  let cs=cEnd,gs=p;
+  while(cs>last.cs&&gs>gEnd&&c[cs-1]===g[gs-1]){cs--;gs--}
+  const ov=cEnd-cs;let a=0;
+  for(let t=0;t<=ov;t++){ // choose GT..AG boundary within ambiguous overlap
+   const ge=gEnd-t,gS=gs+(ov-t);
+   if(g.substr(ge,2)==="GT"&&g.substr(gS-2,2)==="AG"){a=t;break}
+  }
+  last.len-=a;
+  const cs2=cs+(ov-a),gs2=gs+(ov-a);
+  const nl=ext(cs2,gs2);
+  ex.push({cs:cs2,gs:gs2,len:nl});
+ }
+ return ex;
+}
+function run(){
+ $("msg").textContent="";$("out").hidden=true;
+ const C=parse($("c").value).s,G=parse($("gn").value).s,off=parseInt($("off").value)||1;
+ if(!C||!G){$("msg").textContent="Please provide both sequences.";return}
+ const ex=align(C,G);
+ if(!ex){$("msg").textContent="cDNA not found in the genomic sequence (check strand/orientation).";return}
+ const segs=[];
+ ex.forEach((e,i)=>{
+  if(i>0){const p=ex[i-1],s=p.gs+p.len,en=e.gs;segs.push({t:"in",s,e:en-1,n:i})}
+  segs.push({t:"ex",s:e.gs,e:e.gs+e.len-1,n:i+1,cs:e.cs+1,ce:e.cs+e.len})
+ });
+ const tot=segs.reduce((a,s)=>a+s.e-s.s+1,0);
+ const W=Math.max(1000,$("out").parentElement.clientWidth);
+ const tr=$("tr");tr.innerHTML="";
+ segs.forEach(s=>{
+  const len=s.e-s.s+1,w=Math.max(110,Math.round(len/tot*W));
+  const d=document.createElement("div");d.className="seg "+s.t;d.style.width=w+"px";
+  d.innerHTML=`<div class="box">${s.t==="ex"?"Exon "+s.n:"Intron "+s.n}</div><div class="co"><span>${s.s+off}</span><span>${s.e+off}</span></div>`;
+  tr.appendChild(d);
+ });
+ const intronOK=segs.filter(s=>s.t==="in").map(s=>G.substr(s.s,2)+".."+G.substr(s.e-1,2));
+ $("sum").textContent=`${ex.length} exons, ${ex.length-1} introns · cDNA covered ${ex.reduce((a,e)=>a+e.len,0)}/${C.length} nt`;
+ let h="<tr><th>Feature</th><th>Genomic start</th><th>Genomic end</th><th>Length</th><th>cDNA range</th><th>Boundaries</th></tr>";
+ segs.forEach(s=>{
+  const len=s.e-s.s+1,b=s.t==="in"?G.substr(s.s,2)+" … "+G.substr(s.e-1,2):"";
+  h+=`<tr><td style="color:var(--${s.t});font-weight:600">${s.t==="ex"?"Exon "+s.n:"Intron "+s.n}</td><td>${s.s+off}</td><td>${s.e+off}</td><td>${len}</td><td>${s.t==="ex"?s.cs+"–"+s.ce:"—"}</td><td>${b}${b==="GT … AG"?" ✓":b?" (non-canonical)":""}</td></tr>`;
+ });
+ $("tb").innerHTML=h;$("out").hidden=false;
+}
+function extract(){
+ const P=parse($("gn").value),off=parseInt($("off").value)||1,G=P.s;
+ let s=parseInt($("xs").value),e=parseInt($("xe").value);
+ if(!G||isNaN(s)||isNaN(e)){$("msg").textContent="Enter genomic sequence and both start/end integers.";return}
+ if(s>e)[s,e]=[e,s];
+ s=Math.max(s,off);e=Math.min(e,off+G.length-1);
+ if(s>e){$("msg").textContent="Range is outside the genomic sequence.";return}
+ $("msg").textContent="";
+ const name=(P.h.split(/\s/)[0]||"genomic");
+ $("xo").value=wrap(`${name}:${s}-${e} (${e-s+1} bp)`,G.slice(s-off,e-off+1));
+}
+function syncRange(){const G=parse($("gn").value).s,off=parseInt($("off").value)||1;$("xs").value=off;$("xe").value=off+G.length-1}
+$("xg").onclick=extract;
+$("xc").onclick=()=>{$("xo").select();try{navigator.clipboard.writeText($("xo").value)}catch(e){document.execCommand("copy")}};
+$("xd").onclick=()=>{if(!$("xo").value)extract();if(!$("xo").value)return;
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([$("xo").value+"\n"],{type:"text/plain"}));
+ a.download="region_"+$("xs").value+"-"+$("xe").value+".fasta";a.click()};
+const _run=run;run=function(){_run();syncRange();extract()};
+$("go").onclick=run;$("rs").onclick=()=>{preload();run()};
+preload();run();
+</script></body></html>
